@@ -18,6 +18,7 @@ export class BattleScene extends Phaser.Scene {
   private enemy: Combatant = { name: 'Slime', hp: 20, maxHp: 20, mp: 0, maxMp: 0 };
 
   private selectedAction = 0;
+  private isExiting = false;
   private actionTexts: Phaser.GameObjects.Text[] = [];
   private heroStatText!: Phaser.GameObjects.Text;
   private enemyStatText!: Phaser.GameObjects.Text;
@@ -106,6 +107,8 @@ export class BattleScene extends Phaser.Scene {
   }
 
   private handleKeyDown(code: string): void {
+    // Ignore input once a scene transition has been initiated
+    if (this.isExiting) return;
     if (code === 'ArrowLeft' || code === 'KeyA') {
       this.selectedAction = (this.selectedAction - 1 + ACTIONS.length) % ACTIONS.length;
       this.highlightAction();
@@ -121,6 +124,7 @@ export class BattleScene extends Phaser.Scene {
     } else if (code === 'Space' || code === 'Enter') {
       this.executeAction(ACTIONS[this.selectedAction]);
     } else if (code === 'Escape') {
+      this.isExiting = true;
       this.scene.start('MapScene');
     }
   }
@@ -133,6 +137,7 @@ export class BattleScene extends Phaser.Scene {
         this.messageText.setText(`Hero attacks! Deals ${dmg} damage.`);
         this.updateEnemyStats();
         if (this.enemy.hp === 0) {
+          this.isExiting = true;
           this.time.delayedCall(800, () => {
             this.messageText.setText('Enemy defeated! Returning to map…');
             this.time.delayedCall(1200, () => this.scene.start('MapScene'));
@@ -156,6 +161,7 @@ export class BattleScene extends Phaser.Scene {
         this.messageText.setText('No items in inventory.');
         break;
       case 'Run':
+        this.isExiting = true;
         this.messageText.setText('Got away safely!');
         this.time.delayedCall(800, () => this.scene.start('MapScene'));
         break;

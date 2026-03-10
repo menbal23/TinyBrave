@@ -4,6 +4,9 @@ const TILE_SIZE = 16;
 const MAP_COLS = 20;
 const MAP_ROWS = 15;
 const PLAYER_SPEED = 80;
+// Minimum body velocity (px/s) considered as "moving" for animation purposes.
+// Values below this threshold are treated as stationary (e.g. blocked by a wall).
+const MOVEMENT_THRESHOLD = 0.5;
 
 // Tile indices (matches columns in tileset.png)
 const TILE_GRASS = 0;
@@ -75,8 +78,9 @@ export class MapScene extends Phaser.Scene {
       'player'
     );
     this.player.setCollideWorldBounds(true);
-    // Shrink hitbox slightly so corners feel fair
-    this.player.setBodySize(10, 10);
+    // Hitbox: 10×10, offset to sit at the lower-centre of the 16×16 sprite (feet level)
+    this.player.setBodySize(10, 10, false);
+    this.player.setOffset(3, 5);
 
     // Tile collider
     this.physics.add.collider(this.player, groundLayer);
@@ -84,6 +88,9 @@ export class MapScene extends Phaser.Scene {
     // Camera
     this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+
+    // Explicitly set physics world bounds to match the map
+    this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
 
     // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
@@ -94,6 +101,8 @@ export class MapScene extends Phaser.Scene {
       right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
     this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+    // Reset to discard any key state carried over from the previous scene
+    this.spaceKey.reset();
 
     // HUD — fixed to camera
     const cam = this.cameras.main;
@@ -150,8 +159,10 @@ export class MapScene extends Phaser.Scene {
 
     this.player.setVelocity(vx, vy);
 
-    // Play animation
-    const moving = vx !== 0 || vy !== 0;
+    // Play animation — use actual post-physics velocity so the walk cycle stops when
+    // the player is blocked by a wall instead of playing in place.
+    const body = this.player.body as Phaser.Physics.Arcade.Body;
+    const moving = Math.abs(body.velocity.x) > MOVEMENT_THRESHOLD || Math.abs(body.velocity.y) > MOVEMENT_THRESHOLD;
     const animKey = moving ? `walk-${this.facingDir}` : `idle-${this.facingDir}`;
     if (this.player.anims.currentAnim?.key !== animKey) {
       this.player.play(animKey, true);
