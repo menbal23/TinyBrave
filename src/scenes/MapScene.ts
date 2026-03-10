@@ -1,35 +1,12 @@
 import Phaser from 'phaser';
+import { Player } from '../objects/Player';
+import { BattleData } from '../types';
 
-const TILE_SIZE = 16;
-const MAP_COLS = 20;
-const MAP_ROWS = 15;
-
-// Simple tilemap: 0 = grass, 1 = water (impassable)
-const MAP_DATA: number[][] = [
-  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
-  [1,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1],
-  [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
-];
-
-const MAP_WIDTH = MAP_COLS * TILE_SIZE;
-const MAP_HEIGHT = MAP_ROWS * TILE_SIZE;
-
-const PLAYER_SPEED = 80;
+// Encounter rate: 1 in N steps
+const ENCOUNTER_RATE = 8;
 
 export class MapScene extends Phaser.Scene {
-  private player!: Phaser.GameObjects.Image;
+  private player!: Player;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: {
     up: Phaser.Input.Keyboard.Key;
@@ -37,27 +14,50 @@ export class MapScene extends Phaser.Scene {
     left: Phaser.Input.Keyboard.Key;
     right: Phaser.Input.Keyboard.Key;
   };
-  private spaceKey!: Phaser.Input.Keyboard.Key;
-  private tileGraphics!: Phaser.GameObjects.Graphics;
+  private stepCount: number = 0;
+  private isMoving: boolean = false;
 
   constructor() {
     super({ key: 'MapScene' });
   }
 
+  preload(): void {
+    this.load.image('tiles', 'assets/tilesets/tileset.png');
+    this.load.tilemapTiledJSON('map', 'assets/tilemaps/example.json');
+    this.load.spritesheet('player', 'assets/sprites/player.png', {
+      frameWidth: 16,
+      frameHeight: 16,
+    });
+  }
+
   create(): void {
-    // Draw tilemap programmatically
-    this.tileGraphics = this.add.graphics();
-    this.drawTilemap();
+    // --- Tilemap ---
+    const map = this.make.tilemap({ key: 'map' });
+    const tileset = map.addTilesetImage('tileset', 'tiles');
 
-    // Place player at center of map (walkable start position)
-    this.player = this.add.image(TILE_SIZE * 2 + TILE_SIZE / 2, TILE_SIZE * 2 + TILE_SIZE / 2, 'player');
-    this.player.setDepth(1);
+    // --- Player ---
+    this.player = new Player(this, 80, 80);
+    this.add.existing(this.player);
 
-    // Camera setup
-    this.cameras.main.setBounds(0, 0, MAP_WIDTH, MAP_HEIGHT);
-    this.cameras.main.startFollow(this.player, true);
+    if (tileset) {
+      const groundLayer = map.createLayer('Ground', tileset, 0, 0);
+      if (groundLayer) {
+        // Tile index 3 = wall (collides), tiles 1 & 2 are passable
+        groundLayer.setCollisionByExclusion([-1, 1, 2]);
+        this.physics.add.collider(this.player, groundLayer);
+      }
+    }
 
-    // Input
+    // --- Camera ---
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    this.cameras.main.setZoom(1);
+
+    const mapWidth = (map.width ?? 10) * (map.tileWidth ?? 16);
+    const mapHeight = (map.height ?? 10) * (map.tileHeight ?? 16);
+    this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
+    this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
+
+    // --- Input ---
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = {
       up: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.W),
@@ -65,67 +65,60 @@ export class MapScene extends Phaser.Scene {
       left: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A),
       right: this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.D),
     };
-    this.spaceKey = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-    // HUD hint
-    const hint = this.add.text(4, 4, 'Arrow/WASD: Move  SPACE: Battle', {
-      fontSize: '6px',
-      color: '#ffffff',
+    // --- HUD ---
+    this.createHUD();
+
+    // --- Fade in ---
+    this.cameras.main.fadeIn(400, 0, 0, 0);
+  }
+
+  private createHUD(): void {
+    const hud = this.add.text(4, 4, 'HP: 20 / 20', {
+      fontFamily: 'monospace',
+      fontSize: '8px',
+      color: '#00ff88',
     });
-    hint.setScrollFactor(0).setDepth(10);
+    hud.setScrollFactor(0);
+    hud.setDepth(100);
   }
 
-  update(_time: number, delta: number): void {
-    const speed = PLAYER_SPEED;
-    const dt = delta / 1000;
+  update(): void {
+    const up = this.cursors.up.isDown || this.wasd.up.isDown;
+    const down = this.cursors.down.isDown || this.wasd.down.isDown;
+    const left = this.cursors.left.isDown || this.wasd.left.isDown;
+    const right = this.cursors.right.isDown || this.wasd.right.isDown;
 
-    let dx = 0;
-    let dy = 0;
+    const wasMoving = this.isMoving;
+    this.player.move(up, down, left, right);
+    this.isMoving = up || down || left || right;
 
-    if (this.cursors.left.isDown || this.wasd.left.isDown) dx -= speed * dt;
-    if (this.cursors.right.isDown || this.wasd.right.isDown) dx += speed * dt;
-    if (this.cursors.up.isDown || this.wasd.up.isDown) dy -= speed * dt;
-    if (this.cursors.down.isDown || this.wasd.down.isDown) dy += speed * dt;
-
-    const nextX = Phaser.Math.Clamp(this.player.x + dx, TILE_SIZE / 2, MAP_WIDTH - TILE_SIZE / 2);
-    const nextY = Phaser.Math.Clamp(this.player.y + dy, TILE_SIZE / 2, MAP_HEIGHT - TILE_SIZE / 2);
-
-    // Collision: check tile at destination
-    const col = Math.floor(nextX / TILE_SIZE);
-    const row = Math.floor(nextY / TILE_SIZE);
-
-    if (MAP_DATA[row]?.[col] !== 1) {
-      this.player.x = nextX;
-      this.player.y = nextY;
-    }
-
-    // Transition to BattleScene on SPACE
-    if (Phaser.Input.Keyboard.JustDown(this.spaceKey)) {
-      this.scene.start('BattleScene');
-    }
-  }
-
-  private drawTilemap(): void {
-    for (let row = 0; row < MAP_ROWS; row++) {
-      for (let col = 0; col < MAP_COLS; col++) {
-        const tile = MAP_DATA[row][col];
-        const x = col * TILE_SIZE;
-        const y = row * TILE_SIZE;
-
-        if (tile === 0) {
-          // Grass: green
-          this.tileGraphics.fillStyle(0x3a7d44, 1);
-          this.tileGraphics.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-          this.tileGraphics.lineStyle(1, 0x2e6235, 0.5);
-          this.tileGraphics.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
-        } else {
-          // Water / wall: dark blue
-          this.tileGraphics.fillStyle(0x1a3a5c, 1);
-          this.tileGraphics.fillRect(x, y, TILE_SIZE, TILE_SIZE);
-          this.tileGraphics.lineStyle(1, 0x102840, 0.8);
-          this.tileGraphics.strokeRect(x, y, TILE_SIZE, TILE_SIZE);
+    // Count steps for random encounter
+    if (this.isMoving && !wasMoving) {
+      this.stepCount++;
+      if (this.stepCount >= ENCOUNTER_RATE) {
+        this.stepCount = 0;
+        if (Math.random() < 0.4) {
+          this.triggerBattle();
         }
       }
     }
+  }
+
+  private triggerBattle(): void {
+    this.cameras.main.flash(200, 255, 255, 255);
+    this.time.delayedCall(250, () => {
+      const battleData: BattleData = {
+        enemyKey: 'slime',
+        enemyName: 'Slime',
+        enemyHp: 15,
+        enemyMaxHp: 15,
+        enemyAttack: 4,
+        playerHp: 20,
+        playerMaxHp: 20,
+        playerAttack: 6,
+      };
+      this.scene.start('BattleScene', battleData);
+    });
   }
 }
