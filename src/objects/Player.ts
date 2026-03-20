@@ -1,90 +1,48 @@
 import Phaser from 'phaser';
 
-const SPEED = 80;
-
 export class Player extends Phaser.Physics.Arcade.Sprite {
+  private speed = 80;
+
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'player', 0);
-
+    scene.add.existing(this);
     scene.physics.add.existing(this);
     this.setCollideWorldBounds(true);
-    this.setDepth(10);
-
-    // Create animations if they don't exist yet
-    this.createAnimations(scene);
+    (this.body as Phaser.Physics.Arcade.Body).setSize(12, 12);
   }
 
-  private createAnimations(scene: Phaser.Scene): void {
-    const anims = scene.anims;
-
-    // If spritesheet has enough frames, create walk animations.
-    // Otherwise, fall back to showing a single frame.
-    const frameCount = scene.textures.get('player').frameTotal - 1;
-
-    if (frameCount >= 4) {
-      // Assuming layout: row 0 = down, row 1 = up, row 2 = left, row 3 = right (4 frames each)
-      const directions = [
-        { key: 'walk_down', start: 0, end: 3 },
-        { key: 'walk_up', start: 4, end: 7 },
-        { key: 'walk_left', start: 8, end: 11 },
-        { key: 'walk_right', start: 12, end: 15 },
-      ];
-      directions.forEach(({ key, start, end }) => {
-        if (!anims.exists(key)) {
-          anims.create({
-            key,
-            frames: anims.generateFrameNumbers('player', { start, end }),
-            frameRate: 8,
-            repeat: -1,
-          });
-        }
-      });
-    } else {
-      // Minimal spritesheet — just show idle frame
-      if (!anims.exists('idle')) {
-        anims.create({
-          key: 'idle',
-          frames: [{ key: 'player', frame: 0 }],
-          frameRate: 1,
-          repeat: -1,
-        });
-      }
-      this.play('idle');
-    }
-  }
-
-  move(up: boolean, down: boolean, left: boolean, right: boolean): void {
+  move(up: boolean, down: boolean, left: boolean, right: boolean) {
     const body = this.body as Phaser.Physics.Arcade.Body;
-    body.setVelocity(0, 0);
+    let vx = 0;
+    let vy = 0;
+    if (up) vy -= 1;
+    if (down) vy += 1;
+    if (left) vx -= 1;
+    if (right) vx += 1;
 
-    const hasFullAnims = this.scene.anims.exists('walk_down');
-
-    if (left) {
-      body.setVelocityX(-SPEED);
-      if (hasFullAnims) this.play('walk_left', true);
-    } else if (right) {
-      body.setVelocityX(SPEED);
-      if (hasFullAnims) this.play('walk_right', true);
+    // normalize diagonal
+    if (vx !== 0 && vy !== 0) {
+      const inv = Math.SQRT1_2;
+      vx *= inv;
+      vy *= inv;
     }
 
-    if (up) {
-      body.setVelocityY(-SPEED);
-      if (hasFullAnims) this.play('walk_up', true);
-    } else if (down) {
-      body.setVelocityY(SPEED);
-      if (hasFullAnims) this.play('walk_down', true);
-    }
+    body.setVelocity(vx * this.speed, vy * this.speed);
 
-    // Normalize diagonal movement
-    if ((left || right) && (up || down)) {
-      body.velocity.normalize().scale(SPEED);
-    }
-
-    // Idle when no key is pressed
-    if (!up && !down && !left && !right) {
-      if (hasFullAnims) {
-        this.stop();
-        this.setFrame(0);
+    // animations (fallback to single-frame if not available)
+    if (vx === 0 && vy === 0) {
+      // idle
+      if (this.anims.exists('idle-down')) this.anims.play('idle-down', true);
+      else this.setFrame(1);
+    } else {
+      if (vy > 0) {
+        if (this.anims.exists('walk-down')) this.anims.play('walk-down', true);
+      } else if (vy < 0) {
+        if (this.anims.exists('walk-up')) this.anims.play('walk-up', true);
+      } else if (vx < 0) {
+        if (this.anims.exists('walk-left')) this.anims.play('walk-left', true);
+      } else if (vx > 0) {
+        if (this.anims.exists('walk-right')) this.anims.play('walk-right', true);
       }
     }
   }
